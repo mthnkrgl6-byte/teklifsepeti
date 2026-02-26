@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Teklif Sepeti</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Teklif Hazırlama Paneli</h1>
+      <p>Excel fiyat listeleri + müşteri talebi + AI dönüştürme + PDF teklif</p>
+    </header>
+
+    <main class="layout">
+      <section class="card">
+        <h2>1) Fiyat Listeleri</h2>
+        <div class="grid-2">
+          <div>
+            <label for="listType">Liste Türü</label>
+            <select id="listType">
+              <option value="plastik">Plastik</option>
+              <option value="metal">Metal</option>
+              <option value="diger">Diğer</option>
+            </select>
+          </div>
+          <div>
+            <label for="excelUpload">Excel (.xlsx/.xls)</label>
+            <input id="excelUpload" type="file" accept=".xlsx,.xls" />
+          </div>
+        </div>
+        <div class="actions">
+          <button id="loadExcelBtn">Listeyi Yükle</button>
+          <button id="clearListsBtn" class="ghost">Tüm Listeleri Sıfırla</button>
+        </div>
+        <p id="listStatus" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>2) Müşteri Talebi Girişi</h2>
+        <div class="upload-grid">
+          <div>
+            <label for="textRequest">Metin Talebi</label>
+            <textarea id="textRequest" rows="7" placeholder="Örn: PPRC boru 20mm 30 adet\nKüresel vana DN25 12 adet"></textarea>
+          </div>
+          <div>
+            <label for="pdfRequest">PDF Talep Yükle</label>
+            <input id="pdfRequest" type="file" accept=".pdf" />
+
+            <label for="imageRequest">Görsel Talep Yükle</label>
+            <input id="imageRequest" type="file" accept="image/*" />
+            <p class="hint">Not: Görsel OCR tarayıcı API olmadan sınırlıdır; dosya adı ve not alanı ile işlenir.</p>
+          </div>
+        </div>
+
+        <label for="imageNotes">Görsel Notları (opsiyonel)</label>
+        <textarea id="imageNotes" rows="3" placeholder="Fotoğraftaki ürünleri kısa yazın..."></textarea>
+
+        <div class="actions">
+          <button id="convertBtn">Yapay Zekaya Dönüştür</button>
+          <button id="clearRequestBtn" class="ghost">Talep Alanını Temizle</button>
+        </div>
+
+        <p id="convertStatus" class="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>3) Dönüşüm Sonucu</h2>
+        <div class="table-wrap">
+          <table id="resultTable">
+            <thead>
+              <tr>
+                <th>Ürün Kodu</th>
+                <th>Ürün Açıklaması</th>
+                <th>Liste Türü</th>
+                <th>Adet</th>
+                <th>Birim Fiyat</th>
+                <th>Tutar</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="totals">
+          <strong>Ara Toplam: <span id="subtotal">0.00</span> ₺</strong>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>4) Teklif Bilgileri</h2>
+        <div class="grid-3">
+          <div>
+            <label for="companyName">Firma Adı</label>
+            <input id="companyName" type="text" placeholder="Müşteri Firma" />
+          </div>
+          <div>
+            <label for="offerNo">Teklif No</label>
+            <input id="offerNo" type="text" placeholder="T-2026-001" />
+          </div>
+          <div>
+            <label for="offerDate">Tarih</label>
+            <input id="offerDate" type="date" />
+          </div>
+          <div>
+            <label for="paymentType">Ödeme Şekli</label>
+            <input id="paymentType" type="text" placeholder="Havale / Çek" />
+          </div>
+          <div>
+            <label for="discount">İskonto (%)</label>
+            <input id="discount" type="number" value="0" min="0" max="100" />
+          </div>
+          <div>
+            <label for="vat">KDV (%)</label>
+            <input id="vat" type="number" value="20" min="0" max="100" />
+          </div>
+        </div>
+
+        <label for="note">Açıklama</label>
+        <textarea id="note" rows="3" placeholder="Teslim süresi / özel notlar"></textarea>
+
+        <div class="totals split">
+          <div>İskonto Tutarı: <span id="discountAmount">0.00</span> ₺</div>
+          <div>KDV Tutarı: <span id="vatAmount">0.00</span> ₺</div>
+          <strong>Genel Toplam: <span id="grandTotal">0.00</span> ₺</strong>
+        </div>
+
+        <div class="actions">
+          <button id="createOfferBtn">Teklifi Oluştur</button>
+          <button id="downloadPdfBtn" disabled>Teklifi PDF İndir</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
