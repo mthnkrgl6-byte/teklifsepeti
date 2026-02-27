@@ -335,14 +335,21 @@ function extractRequestedQuantity(line) {
 
   if (explicit) {
     const quantity = parseQuantityNumber(explicit[1]);
-    const cleanName = line.replace(explicit[0], '').trim();
+    const cleanName = line.replace(explicit[0], "").trim();
     return { quantity, cleanName };
   }
 
+  // Ölçü belirten ifadeleri (20'lik, 20mm, 20 mm, 20x500) adet olarak yorumlama.
+  const hasDimensionHint = /(\d+\s*['’`-]?\s*lik\b)|(\d+\s*mm\b)|(\d+\s*x\s*\d+)/i.test(line);
+  if (hasDimensionHint) {
+    return { quantity: 1, cleanName: line };
+  }
+
+  // Sadece sayı ile biten ve ölçü işareti içermeyen satırlarda fallback miktar kullan.
   const trailingNumber = line.match(/(\d+(?:[.,]\d+)?)\s*$/);
   if (trailingNumber) {
     const quantity = parseQuantityNumber(trailingNumber[1]);
-    const cleanName = line.replace(/(\d+(?:[.,]\d+)?)\s*$/, '').trim();
+    const cleanName = line.replace(/(\d+(?:[.,]\d+)?)\s*$/, "").trim();
     return { quantity, cleanName };
   }
 
