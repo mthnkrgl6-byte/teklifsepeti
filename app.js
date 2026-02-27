@@ -324,11 +324,35 @@ function parseRequestText(text) {
     .filter(Boolean)
     .flatMap((line) => splitRequestLine(line))
     .map((line) => {
-      const explicit = [...line.matchAll(/(\d+)\s*(adet|pcs|tane)\b/gi)].pop();
-      const quantity = explicit ? Number(explicit[1]) : Number(line.match(/(\d+)\s*$/)?.[1] || 1);
-      const cleanName = explicit ? line.replace(explicit[0], '').trim() : line.replace(/(\d+)\s*$/, '').trim();
+      const { quantity, cleanName } = extractRequestedQuantity(line);
       return { search: cleanName || line, quantity: Number.isFinite(quantity) ? quantity : 1 };
     });
+}
+
+function extractRequestedQuantity(line) {
+  const quantityRegex = /(\d+(?:[.,]\d+)?)\s*(adet|pcs|tane|metre|meter|mt|mtr|m)\b/gi;
+  const explicit = [...line.matchAll(quantityRegex)].pop();
+
+  if (explicit) {
+    const quantity = parseQuantityNumber(explicit[1]);
+    const cleanName = line.replace(explicit[0], '').trim();
+    return { quantity, cleanName };
+  }
+
+  const trailingNumber = line.match(/(\d+(?:[.,]\d+)?)\s*$/);
+  if (trailingNumber) {
+    const quantity = parseQuantityNumber(trailingNumber[1]);
+    const cleanName = line.replace(/(\d+(?:[.,]\d+)?)\s*$/, '').trim();
+    return { quantity, cleanName };
+  }
+
+  return { quantity: 1, cleanName: line };
+}
+
+function parseQuantityNumber(value) {
+  const normalized = String(value || '1').replace(',', '.');
+  const num = Number(normalized);
+  return Number.isFinite(num) && num > 0 ? num : 1;
 }
 
 function splitRequestLine(line) {
@@ -586,7 +610,7 @@ function downloadPdf() {
   y += 10;
 
   latestOffer.items.forEach((item, index) => {
-    const line = `${index + 1}) ${item.code} - ${item.description} | ${item.quantity} adet x ${formatMoney(item.unitPrice)} = ${formatMoney(item.total)} TL`;
+    const line = `${index + 1}) ${item.code} - ${item.description} | ${item.quantity} miktar x ${formatMoney(item.unitPrice)} = ${formatMoney(item.total)} TL`;
     const split = doc.splitTextToSize(line, 180);
     doc.text(split, 14, y);
     y += split.length * 6;
