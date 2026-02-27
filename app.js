@@ -209,7 +209,7 @@ function mapExcelRows(rawRows, listType, listName) {
   const inferredPriceIndex = detectedPriceIndex === -1 ? inferPriceColumnIndex(dataRows) : detectedPriceIndex;
   const priceIndex = inferredPriceIndex === -1 ? 2 : inferredPriceIndex;
 
-  return dataRows
+  let parsedItems = dataRows
     .map((row) => {
       const code = String(row[codeIndex] ?? '').trim();
       const description = String(row[descriptionIndex] ?? '').trim();
@@ -217,6 +217,23 @@ function mapExcelRows(rawRows, listType, listName) {
       return { code, description, unitPrice, listType, listName };
     })
     .filter((item) => item.code || item.description);
+
+  const hasAnyPrice = parsedItems.some((item) => item.unitPrice > 0);
+  if (!hasAnyPrice) {
+    const fallbackPriceIndex = inferPriceColumnByContent(dataRows);
+    if (fallbackPriceIndex !== -1 && fallbackPriceIndex !== priceIndex) {
+      parsedItems = dataRows
+        .map((row) => {
+          const code = String(row[codeIndex] ?? '').trim();
+          const description = String(row[descriptionIndex] ?? '').trim();
+          const unitPrice = parsePrice(row[fallbackPriceIndex]);
+          return { code, description, unitPrice, listType, listName };
+        })
+        .filter((item) => item.code || item.description);
+    }
+  }
+
+  return parsedItems;
 }
 
 function findColumnIndex(headerRow, matcher, fallback) {
@@ -238,6 +255,42 @@ function inferPriceColumnIndex(dataRows) {
       if (value > 0) score += 1;
       if (String(raw ?? '').includes(',') || String(raw ?? '').includes('.')) score += 0.5;
     });
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = col;
+    }
+  }
+
+  return bestIndex;
+}
+
+
+function inferPriceColumnByContent(dataRows) {
+  const sampleRows = dataRows.slice(0, 200);
+  const maxColumnCount = sampleRows.reduce((max, row) => Math.max(max, row.length), 0);
+
+  let bestIndex = -1;
+  let bestScore = 0;
+
+  for (let col = 0; col < maxColumnCount; col += 1) {
+    let positiveCount = 0;
+    let decimalLikeCount = 0;
+
+    sampleRows.forEach((row) => {
+      const raw = row[col];
+      const parsed = parsePrice(raw);
+      if (parsed > 0) {
+        positiveCount += 1;
+        const rawText = String(raw ?? '');
+        if (/[.,]/.test(rawText) || parsed % 1 !== 0) {
+          decimalLikeCount += 1;
+        }
+      }
+    });
+
+    if (!positiveCount) continue;
+
+    const score = positiveCount + decimalLikeCount * 1.2;
     if (score > bestScore) {
       bestScore = score;
       bestIndex = col;
