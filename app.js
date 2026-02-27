@@ -322,12 +322,23 @@ function parseRequestText(text) {
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
+    .flatMap((line) => splitRequestLine(line))
     .map((line) => {
       const explicit = [...line.matchAll(/(\d+)\s*(adet|pcs|tane)\b/gi)].pop();
       const quantity = explicit ? Number(explicit[1]) : Number(line.match(/(\d+)\s*$/)?.[1] || 1);
       const cleanName = explicit ? line.replace(explicit[0], '').trim() : line.replace(/(\d+)\s*$/, '').trim();
       return { search: cleanName || line, quantity: Number.isFinite(quantity) ? quantity : 1 };
     });
+}
+
+function splitRequestLine(line) {
+  const parts = line
+    .split(/[;|]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length > 1) return parts;
+  return [line];
 }
 
 function getAllItems() {
@@ -337,13 +348,18 @@ function getAllItems() {
 function smartMatch(items) {
   const flattened = getAllItems();
   return items.map((item) => {
-    if (!flattened.length) return { code: '-', description: item.search, listLabel: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
+    if (!flattened.length) return createUnmatchedRow(item);
 
+    const searchText = normalizeForMatch(item.search);
     const match = flattened
-      .map((candidate) => ({ candidate, score: similarity(item.search.toLowerCase(), `${candidate.code} ${candidate.description}`.toLowerCase()) }))
+      .map((candidate) => {
+        const candidateText = normalizeForMatch(`${candidate.code} ${candidate.description}`);
+        const score = similarity(searchText, candidateText);
+        return { candidate, score };
+      })
       .sort((a, b) => b.score - a.score)[0];
 
-    if (!match || match.score < 0.25) return { code: '-', description: item.search, listLabel: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
+    if (!match || match.score < 0.12) return createUnmatchedRow(item);
 
     const unitPrice = Number(match.candidate.unitPrice) || 0;
     return {
@@ -357,13 +373,80 @@ function smartMatch(items) {
   });
 }
 
+function createUnmatchedRow(item) {
+  return { code: '-', description: item.search, listLabel: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
+}
+
+function normalizeForMatch(text) {
+  return String(text || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[×*]/g, 'x')
+    .replace(/\b(ø|phi)\b/g, '')
+    .replace(/[.,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function similarity(a, b) {
-  const tokensA = a.split(/\s+/).filter(Boolean);
-  const tokensB = b.split(/\s+/).filter(Boolean);
+  const tokensA = tokenizeForMatch(a);
+  const tokensB = tokenizeForMatch(b);
   if (!tokensA.length || !tokensB.length) return 0;
+
+  const tokenScore = tokenOverlapScore(tokensA, tokensB);
+  const charScore = diceCoefficient(a, b);
+  const dimensionScore = dimensionMatchScore(tokensA, tokensB);
+
+  return tokenScore * 0.5 + charScore * 0.3 + dimensionScore * 0.2;
+}
+
+function tokenizeForMatch(text) {
+  return text
+    .split(/[^a-z0-9x]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function tokenOverlapScore(tokensA, tokensB) {
+  const setA = new Set(tokensA);
   const setB = new Set(tokensB);
-  const common = tokensA.filter((token) => setB.has(token)).length;
-  return common / Math.max(tokensA.length, tokensB.length);
+  let common = 0;
+  setA.forEach((token) => {
+    if (setB.has(token)) common += 1;
+  });
+  return common / Math.max(setA.size, setB.size, 1);
+}
+
+function diceCoefficient(a, b) {
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return 0;
+
+  const gramsA = new Map();
+  for (let i = 0; i < a.length - 1; i += 1) {
+    const gram = a.slice(i, i + 2);
+    gramsA.set(gram, (gramsA.get(gram) || 0) + 1);
+  }
+
+  let intersection = 0;
+  for (let i = 0; i < b.length - 1; i += 1) {
+    const gram = b.slice(i, i + 2);
+    const count = gramsA.get(gram) || 0;
+    if (count > 0) {
+      gramsA.set(gram, count - 1);
+      intersection += 1;
+    }
+  }
+
+  return (2 * intersection) / (a.length + b.length - 2);
+}
+
+function dimensionMatchScore(tokensA, tokensB) {
+  const dimRegex = /^\d{1,4}x\d{1,4}$/;
+  const dimsA = tokensA.filter((t) => dimRegex.test(t));
+  const dimsB = new Set(tokensB.filter((t) => dimRegex.test(t)));
+  if (!dimsA.length || !dimsB.size) return 0;
+
+  const common = dimsA.filter((dim) => dimsB.has(dim)).length;
+  return common / Math.max(dimsA.length, dimsB.size, 1);
 }
 
 function renderTable() {
