@@ -143,9 +143,11 @@ function mapExcelRows(rawRows, listType) {
   const headerNormalized = bestHeader.map((cell) => normalizeText(cell));
   const codeIndex = findColumnIndex(headerNormalized, isCodeHeader, 0);
   const descriptionIndex = findColumnIndex(headerNormalized, isDescriptionHeader, 1);
-  const priceIndex = findColumnIndex(headerNormalized, isPriceHeader, 2);
+  const detectedPriceIndex = findColumnIndex(headerNormalized, isPriceHeader, -1);
 
   const dataRows = rawRows.slice(headerRowIndex + 1);
+  const inferredPriceIndex = detectedPriceIndex === -1 ? inferPriceColumnIndex(dataRows) : detectedPriceIndex;
+  const priceIndex = inferredPriceIndex === -1 ? 2 : inferredPriceIndex;
   return dataRows
     .map((row) => {
       const code = String(row[codeIndex] ?? '').trim();
@@ -165,6 +167,38 @@ function mapExcelRows(rawRows, listType) {
 function findColumnIndex(headerRow, matcher, fallback) {
   const index = headerRow.findIndex((value) => matcher(value));
   return index === -1 ? fallback : index;
+}
+
+function inferPriceColumnIndex(dataRows) {
+  const sampleRows = dataRows.slice(0, 30);
+  const maxColumnCount = sampleRows.reduce((max, row) => Math.max(max, row.length), 0);
+
+  let bestIndex = -1;
+  let bestScore = -1;
+
+  for (let col = 0; col < maxColumnCount; col += 1) {
+    let numericCount = 0;
+    let decimalLikeCount = 0;
+
+    sampleRows.forEach((row) => {
+      const raw = row[col];
+      const value = parsePrice(raw);
+      if (value > 0) {
+        numericCount += 1;
+        if (String(raw ?? '').includes(',') || String(raw ?? '').includes('.')) {
+          decimalLikeCount += 1;
+        }
+      }
+    });
+
+    const score = numericCount + decimalLikeCount * 0.5;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = col;
+    }
+  }
+
+  return bestIndex;
 }
 
 function isCodeHeader(value) {
@@ -189,16 +223,28 @@ function normalizeText(value) {
 }
 
 function parsePrice(rawValue) {
+  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+    return rawValue;
+  }
+
   const raw = String(rawValue ?? '').trim();
   if (!raw) return 0;
 
-  const standardized = raw
-    .replace(/\s/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.')
-    .replace(/[^0-9.-]/g, '');
+  const sanitized = raw.replace(/\s/g, '').replace(/[^0-9,.-]/g, '');
+  if (!sanitized) return 0;
 
-  const value = Number(standardized);
+  const lastComma = sanitized.lastIndexOf(',');
+  const lastDot = sanitized.lastIndexOf('.');
+  const decimalSeparator = lastComma > lastDot ? ',' : '.';
+
+  let normalized = sanitized;
+  if (decimalSeparator === ',') {
+    normalized = normalized.replace(/\./g, '').replace(',', '.');
+  } else {
+    normalized = normalized.replace(/,/g, '');
+  }
+
+  const value = Number(normalized);
   return Number.isFinite(value) ? value : 0;
 }
 
@@ -254,14 +300,31 @@ function parseRequestText(text) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const quantityMatch = line.match(/(\d+)\s*(adet|pcs|tane)?/i);
-      const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
-      const cleanName = line.replace(/\d+\s*(adet|pcs|tane)?/i, '').trim();
+      const { quantity, cleanName } = extractQuantity(line);
       return {
         search: cleanName || line,
         quantity,
       };
     });
+}
+
+function extractQuantity(line) {
+  const explicitQuantityMatches = [...line.matchAll(/(\d+)\s*(adet|pcs|tane)\b/gi)];
+  if (explicitQuantityMatches.length) {
+    const selected = explicitQuantityMatches[explicitQuantityMatches.length - 1];
+    const quantity = Number(selected[1]);
+    const cleanName = line.replace(selected[0], '').trim();
+    return { quantity: Number.isFinite(quantity) ? quantity : 1, cleanName };
+  }
+
+  const trailingNumber = line.match(/(\d+)\s*$/);
+  if (trailingNumber) {
+    const quantity = Number(trailingNumber[1]);
+    const cleanName = line.replace(/(\d+)\s*$/, '').trim();
+    return { quantity: Number.isFinite(quantity) ? quantity : 1, cleanName };
+  }
+
+  return { quantity: 1, cleanName: line };
 }
 
 function smartMatch(items) {
@@ -423,7 +486,11 @@ async function extractPdfText(file) {
 }
 
 function formatMoney(value) {
-  return (Number(value) || 0).toFixed(2);
+  const number = Number(value) || 0;
+  return new Intl.NumberFormat('tr-TR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(number);
 }
 
 function escapeHtml(str) {
