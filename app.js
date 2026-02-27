@@ -390,7 +390,7 @@ function smartMatch(items) {
       })
       .sort((a, b) => b.score - a.score)[0];
 
-    if (!match || match.score < 0.12) return createUnmatchedRow(item);
+    if (!match || match.score < 0.08) return createUnmatchedRow(item);
 
     const unitPrice = Number(match.candidate.unitPrice) || 0;
     return {
@@ -414,13 +414,14 @@ function normalizeForMatch(text) {
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .replace(/ı/g, 'i')
-    .replace(/[ş]/g, 's')
-    .replace(/[ğ]/g, 'g')
-    .replace(/[ü]/g, 'u')
-    .replace(/[ö]/g, 'o')
-    .replace(/[ç]/g, 'c')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[øØ]/g, '')
     .replace(/[×*]/g, 'x')
-    .replace(/(ø|phi)/g, '')
+    .replace(/phi/g, '')
     .replace(/[.,;:_/\-]+/g, ' ')
     .replace(/[  -​  　]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -443,15 +444,35 @@ function similarity(a, b) {
   const compactA = compactForMatch(a);
   const compactB = compactForMatch(b);
   const compactScore = compactA && compactB ? diceCoefficient(compactA, compactB) : 0;
+  const containsBonus = compactA && compactB && (compactA.includes(compactB) || compactB.includes(compactA)) ? 0.15 : 0;
 
-  return tokenScore * 0.4 + charScore * 0.2 + dimensionScore * 0.2 + compactScore * 0.2;
+  return Math.min(1, tokenScore * 0.35 + charScore * 0.2 + dimensionScore * 0.2 + compactScore * 0.25 + containsBonus);
 }
 
 function tokenizeForMatch(text) {
-  return text
+  const baseTokens = normalizeForMatch(text)
     .split(/[^a-z0-9x]+/)
     .map((token) => token.trim())
     .filter((token) => token.length >= 2);
+
+  const expanded = [];
+  baseTokens.forEach((token) => {
+    expanded.push(token);
+
+    const alphaNum = token.match(/^([a-z]+)(\d+[a-z]*)$/);
+    if (alphaNum) {
+      expanded.push(alphaNum[1]);
+      expanded.push(alphaNum[2]);
+    }
+
+    const numAlpha = token.match(/^(\d+)([a-z]+)$/);
+    if (numAlpha) {
+      expanded.push(numAlpha[1]);
+      expanded.push(numAlpha[2]);
+    }
+  });
+
+  return [...new Set(expanded)];
 }
 
 function tokenOverlapScore(tokensA, tokensB) {
