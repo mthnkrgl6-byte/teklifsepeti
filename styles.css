@@ -22,6 +22,10 @@ body {
   background: var(--card);
   border-bottom: 4px solid var(--accent);
   padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
 }
 
 .app-header h1 {
@@ -33,10 +37,33 @@ body {
   margin: 6px 0 0;
 }
 
+.top-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-btn {
+  width: auto;
+  padding: 10px 16px;
+  border-radius: 999px;
+}
+
+.nav-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .layout {
   padding: 20px;
-  display: grid;
+}
+
+.page {
+  display: none;
   gap: 16px;
+}
+
+.page.is-visible {
+  display: grid;
 }
 
 .card {
@@ -94,6 +121,7 @@ button.ghost {
   margin-top: 12px;
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .grid-2,
@@ -126,6 +154,10 @@ button.ghost {
   overflow-x: auto;
 }
 
+.compact-gap {
+  margin-top: 12px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -149,4 +181,11 @@ th {
 .split {
   display: grid;
   gap: 8px;
+}
+
+@media (max-width: 840px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

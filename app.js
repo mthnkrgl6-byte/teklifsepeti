@@ -8,6 +8,13 @@ let convertedItems = [];
 let latestOffer = null;
 
 const refs = {
+  goOfferPage: document.getElementById('goOfferPage'),
+  goPricePage: document.getElementById('goPricePage'),
+  goOfferPageInline: document.getElementById('goOfferPageInline'),
+  goPricePageInline: document.getElementById('goPricePageInline'),
+  offerPage: document.getElementById('offerPage'),
+  pricePage: document.getElementById('pricePage'),
+  listCountBody: document.getElementById('listCountBody'),
   listType: document.getElementById('listType'),
   excelUpload: document.getElementById('excelUpload'),
   loadExcelBtn: document.getElementById('loadExcelBtn'),
@@ -37,28 +44,46 @@ const refs = {
 };
 
 refs.offerDate.valueAsDate = new Date();
+bindEvents();
+renderListCounts();
 
-refs.loadExcelBtn.addEventListener('click', loadExcelList);
-refs.clearListsBtn.addEventListener('click', () => {
-  priceLists.plastik = [];
-  priceLists.metal = [];
-  priceLists.diger = [];
-  refs.listStatus.textContent = 'Tüm fiyat listeleri temizlendi.';
-});
+function bindEvents() {
+  refs.goOfferPage.addEventListener('click', () => switchPage('offer'));
+  refs.goPricePage.addEventListener('click', () => switchPage('price'));
+  refs.goOfferPageInline.addEventListener('click', () => switchPage('offer'));
+  refs.goPricePageInline.addEventListener('click', () => switchPage('price'));
 
-refs.clearRequestBtn.addEventListener('click', () => {
-  refs.textRequest.value = '';
-  refs.pdfRequest.value = '';
-  refs.imageRequest.value = '';
-  refs.imageNotes.value = '';
-  refs.convertStatus.textContent = 'Talep alanları temizlendi.';
-});
+  refs.loadExcelBtn.addEventListener('click', loadExcelList);
+  refs.clearListsBtn.addEventListener('click', () => {
+    priceLists.plastik = [];
+    priceLists.metal = [];
+    priceLists.diger = [];
+    refs.listStatus.textContent = 'Tüm fiyat listeleri temizlendi.';
+    renderListCounts();
+  });
 
-refs.convertBtn.addEventListener('click', convertRequests);
-refs.createOfferBtn.addEventListener('click', createOffer);
-refs.downloadPdfBtn.addEventListener('click', downloadPdf);
-refs.discount.addEventListener('input', updateTotals);
-refs.vat.addEventListener('input', updateTotals);
+  refs.clearRequestBtn.addEventListener('click', () => {
+    refs.textRequest.value = '';
+    refs.pdfRequest.value = '';
+    refs.imageRequest.value = '';
+    refs.imageNotes.value = '';
+    refs.convertStatus.textContent = 'Talep alanları temizlendi.';
+  });
+
+  refs.convertBtn.addEventListener('click', convertRequests);
+  refs.createOfferBtn.addEventListener('click', createOffer);
+  refs.downloadPdfBtn.addEventListener('click', downloadPdf);
+  refs.discount.addEventListener('input', updateTotals);
+  refs.vat.addEventListener('input', updateTotals);
+}
+
+function switchPage(target) {
+  const isOffer = target === 'offer';
+  refs.offerPage.classList.toggle('is-visible', isOffer);
+  refs.pricePage.classList.toggle('is-visible', !isOffer);
+  refs.goOfferPage.classList.toggle('active', isOffer);
+  refs.goPricePage.classList.toggle('active', !isOffer);
+}
 
 async function loadExcelList() {
   const file = refs.excelUpload.files[0];
@@ -71,31 +96,123 @@ async function loadExcelList() {
     const arrayBuffer = await file.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+      header: 1,
       defval: '',
-      raw: false,
+      blankrows: false,
     });
 
-    const normalized = rows
-      .map((row) => {
-        const code = String(row['Ürün Kodu'] || row['urun_kodu'] || row['code'] || '').trim();
-        const description = String(row['Ürün Açıklaması'] || row['urun_aciklamasi'] || row['description'] || '').trim();
-        const unitPrice = Number(String(row['Birim Fiyat'] || row['fiyat'] || row['price'] || '0').replace(',', '.'));
-
-        return {
-          code,
-          description,
-          unitPrice: Number.isFinite(unitPrice) ? unitPrice : 0,
-          listType: refs.listType.value,
-        };
-      })
-      .filter((x) => x.code || x.description);
-
+    const normalized = mapExcelRows(rawRows, refs.listType.value);
     priceLists[refs.listType.value] = normalized;
+    renderListCounts();
+
+    if (!normalized.length) {
+      refs.listStatus.textContent = 'Excel okundu ancak ürün satırı bulunamadı. Lütfen kolon adlarını kontrol edin.';
+      return;
+    }
+
     refs.listStatus.textContent = `${normalized.length} ürün "${refs.listType.value}" listesine yüklendi.`;
+    refs.excelUpload.value = '';
   } catch (error) {
     refs.listStatus.textContent = `Excel okunamadı: ${error.message}`;
   }
+}
+
+function mapExcelRows(rawRows, listType) {
+  if (!rawRows.length) return [];
+
+  const headerCandidateLimit = Math.min(rawRows.length, 6);
+  let headerRowIndex = 0;
+  let bestHeader = [];
+  let bestScore = -1;
+
+  for (let i = 0; i < headerCandidateLimit; i += 1) {
+    const row = rawRows[i].map((cell) => normalizeText(cell));
+    const score = row.reduce((sum, cell) => {
+      if (isCodeHeader(cell) || isDescriptionHeader(cell) || isPriceHeader(cell)) return sum + 1;
+      return sum;
+    }, 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      headerRowIndex = i;
+      bestHeader = rawRows[i];
+    }
+  }
+
+  const headerNormalized = bestHeader.map((cell) => normalizeText(cell));
+  const codeIndex = findColumnIndex(headerNormalized, isCodeHeader, 0);
+  const descriptionIndex = findColumnIndex(headerNormalized, isDescriptionHeader, 1);
+  const priceIndex = findColumnIndex(headerNormalized, isPriceHeader, 2);
+
+  const dataRows = rawRows.slice(headerRowIndex + 1);
+  return dataRows
+    .map((row) => {
+      const code = String(row[codeIndex] ?? '').trim();
+      const description = String(row[descriptionIndex] ?? '').trim();
+      const unitPrice = parsePrice(row[priceIndex]);
+
+      return {
+        code,
+        description,
+        unitPrice,
+        listType,
+      };
+    })
+    .filter((item) => item.code || item.description);
+}
+
+function findColumnIndex(headerRow, matcher, fallback) {
+  const index = headerRow.findIndex((value) => matcher(value));
+  return index === -1 ? fallback : index;
+}
+
+function isCodeHeader(value) {
+  return ['urunkodu', 'stokkodu', 'kodu', 'kod', 'urunno', 'itemcode', 'code'].some((key) => value.includes(key));
+}
+
+function isDescriptionHeader(value) {
+  return ['urunaciklamasi', 'aciklama', 'urunadi', 'tanim', 'description', 'name'].some((key) => value.includes(key));
+}
+
+function isPriceHeader(value) {
+  return ['birimfiyat', 'fiyat', 'listefiyati', 'price', 'unitprice'].some((key) => value.includes(key));
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function parsePrice(rawValue) {
+  const raw = String(rawValue ?? '').trim();
+  if (!raw) return 0;
+
+  const standardized = raw
+    .replace(/\s/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.')
+    .replace(/[^0-9.-]/g, '');
+
+  const value = Number(standardized);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function renderListCounts() {
+  refs.listCountBody.innerHTML = '';
+  ['plastik', 'metal', 'diger'].forEach((listName) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${capitalize(listName)}</td><td>${priceLists[listName].length}</td>`;
+    refs.listCountBody.appendChild(tr);
+  });
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 async function convertRequests() {
@@ -126,10 +243,9 @@ async function convertRequests() {
 
   const requestedItems = parseRequestText(merged);
   convertedItems = smartMatch(requestedItems);
-
   renderTable();
   updateTotals();
-  refs.convertStatus.textContent = `${convertedItems.length} satır AI ile dönüştürüldü ve fiyatlandırıldı.`;
+  refs.convertStatus.textContent = `${convertedItems.length} satır dönüştürüldü ve fiyatlandırıldı.`;
 }
 
 function parseRequestText(text) {
@@ -142,7 +258,6 @@ function parseRequestText(text) {
       const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
       const cleanName = line.replace(/\d+\s*(adet|pcs|tane)?/i, '').trim();
       return {
-        raw: line,
         search: cleanName || line,
         quantity,
       };
@@ -154,14 +269,7 @@ function smartMatch(items) {
 
   return items.map((item) => {
     if (!flattened.length) {
-      return {
-        code: '-',
-        description: item.search,
-        listType: 'eşleşme yok',
-        quantity: item.quantity,
-        unitPrice: 0,
-        total: 0,
-      };
+      return { code: '-', description: item.search, listType: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
     }
 
     const match = flattened
@@ -172,14 +280,7 @@ function smartMatch(items) {
       .sort((a, b) => b.score - a.score)[0];
 
     if (!match || match.score < 0.25) {
-      return {
-        code: '-',
-        description: item.search,
-        listType: 'eşleşme yok',
-        quantity: item.quantity,
-        unitPrice: 0,
-        total: 0,
-      };
+      return { code: '-', description: item.search, listType: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
     }
 
     const total = item.quantity * match.candidate.unitPrice;
@@ -200,15 +301,12 @@ function similarity(a, b) {
   if (!tokensA.length || !tokensB.length) return 0;
   const setB = new Set(tokensB);
   let common = 0;
-  for (const token of tokensA) {
-    if (setB.has(token)) common += 1;
-  }
+  for (const token of tokensA) if (setB.has(token)) common += 1;
   return common / Math.max(tokensA.length, tokensB.length);
 }
 
 function renderTable() {
   refs.resultTableBody.innerHTML = '';
-
   convertedItems.forEach((item) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -254,12 +352,6 @@ function createOffer() {
     vatRate: Number(refs.vat.value || 0),
     note: refs.note.value.trim(),
     items: [...convertedItems],
-    totals: {
-      subtotal: Number(refs.subtotal.textContent),
-      discountAmount: Number(refs.discountAmount.textContent),
-      vatAmount: Number(refs.vatAmount.textContent),
-      grandTotal: Number(refs.grandTotal.textContent),
-    },
   };
 
   refs.convertStatus.textContent = `Teklif hazırlandı: ${latestOffer.offerNo}`;
@@ -308,13 +400,6 @@ function downloadPdf() {
   doc.text(`KDV (%${latestOffer.vatRate}): ${refs.vatAmount.textContent} TL`, 14, y);
   y += 7;
   doc.text(`Genel Toplam: ${refs.grandTotal.textContent} TL`, 14, y);
-  y += 10;
-
-  if (latestOffer.note) {
-    doc.text('Aciklama:', 14, y);
-    y += 6;
-    doc.text(doc.splitTextToSize(latestOffer.note, 180), 14, y);
-  }
 
   doc.save(`${latestOffer.offerNo}.pdf`);
 }
