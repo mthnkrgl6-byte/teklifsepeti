@@ -411,11 +411,24 @@ function createUnmatchedRow(item) {
 function normalizeForMatch(text) {
   return String(text || '')
     .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/ı/g, 'i')
+    .replace(/[ş]/g, 's')
+    .replace(/[ğ]/g, 'g')
+    .replace(/[ü]/g, 'u')
+    .replace(/[ö]/g, 'o')
+    .replace(/[ç]/g, 'c')
     .replace(/[×*]/g, 'x')
-    .replace(/\b(ø|phi)\b/g, '')
-    .replace(/[.,]/g, ' ')
+    .replace(/(ø|phi)/g, '')
+    .replace(/[.,;:_/\-]+/g, ' ')
+    .replace(/[  -​  　]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function compactForMatch(text) {
+  return normalizeForMatch(text).replace(/[^a-z0-9]/g, '');
 }
 
 function similarity(a, b) {
@@ -427,7 +440,11 @@ function similarity(a, b) {
   const charScore = diceCoefficient(a, b);
   const dimensionScore = dimensionMatchScore(tokensA, tokensB);
 
-  return tokenScore * 0.5 + charScore * 0.3 + dimensionScore * 0.2;
+  const compactA = compactForMatch(a);
+  const compactB = compactForMatch(b);
+  const compactScore = compactA && compactB ? diceCoefficient(compactA, compactB) : 0;
+
+  return tokenScore * 0.4 + charScore * 0.2 + dimensionScore * 0.2 + compactScore * 0.2;
 }
 
 function tokenizeForMatch(text) {
