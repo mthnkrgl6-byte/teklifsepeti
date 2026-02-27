@@ -61,15 +61,30 @@
                 <tr>
                   <th>Ürün Kodu</th>
                   <th>Ürün Açıklaması</th>
-                  <th>Liste Türü</th>
+                  <th>Liste</th>
                   <th>Adet</th>
                   <th>Birim Fiyat</th>
                   <th>Tutar</th>
+                  <th>İşlem</th>
                 </tr>
               </thead>
               <tbody></tbody>
             </table>
           </div>
+
+          <div class="inline-form">
+            <input id="manualCode" type="text" placeholder="Ürün kodu" />
+            <input id="manualDesc" type="text" placeholder="Ürün açıklaması" />
+            <select id="manualListType">
+              <option value="plastik">Plastik</option>
+              <option value="metal">Metal</option>
+              <option value="diger">Diğer</option>
+            </select>
+            <input id="manualQty" type="number" min="1" value="1" placeholder="Adet" />
+            <input id="manualPrice" type="text" placeholder="Birim fiyat (örn 33,95)" />
+            <button id="addManualRowBtn" type="button">Ürün Ekle</button>
+          </div>
+
           <div class="totals">
             <strong>Ara Toplam: <span id="subtotal">0.00</span> ₺</strong>
           </div>
@@ -92,7 +107,15 @@
             </div>
             <div>
               <label for="paymentType">Ödeme Şekli</label>
-              <input id="paymentType" type="text" placeholder="Havale / Çek" />
+              <select id="paymentType">
+                <option value="havale">Havale / Nakit</option>
+                <option value="cek">Çek</option>
+                <option value="kredi_karti">Kredi Kartı</option>
+              </select>
+            </div>
+            <div>
+              <label for="maturityRate">Vade Farkı (%)</label>
+              <input id="maturityRate" type="number" value="0" min="0" max="100" disabled />
             </div>
             <div>
               <label for="discount">İskonto (%)</label>
@@ -109,6 +132,7 @@
 
           <div class="totals split">
             <div>İskonto Tutarı: <span id="discountAmount">0.00</span> ₺</div>
+            <div>Vade Farkı Tutarı: <span id="maturityAmount">0.00</span> ₺</div>
             <div>KDV Tutarı: <span id="vatAmount">0.00</span> ₺</div>
             <strong>Genel Toplam: <span id="grandTotal">0.00</span> ₺</strong>
           </div>
@@ -133,6 +157,10 @@
               </select>
             </div>
             <div>
+              <label for="listName">Liste Adı</label>
+              <input id="listName" type="text" placeholder="Örn: 2026 Şubat Plastik" />
+            </div>
+            <div>
               <label for="excelUpload">Excel (.xlsx/.xls)</label>
               <input id="excelUpload" type="file" accept=".xlsx,.xls" />
             </div>
@@ -149,8 +177,11 @@
             <table>
               <thead>
                 <tr>
-                  <th>Liste</th>
-                  <th>Kayıt Sayısı</th>
+                  <th>Liste Türü</th>
+                  <th>Liste Adı</th>
+                  <th>Ürün Sayısı</th>
+                  <th>Ürün Grupları</th>
+                  <th>İşlem</th>
                 </tr>
               </thead>
               <tbody id="listCountBody"></tbody>

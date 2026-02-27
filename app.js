@@ -16,6 +16,7 @@ const refs = {
   pricePage: document.getElementById('pricePage'),
   listCountBody: document.getElementById('listCountBody'),
   listType: document.getElementById('listType'),
+  listName: document.getElementById('listName'),
   excelUpload: document.getElementById('excelUpload'),
   loadExcelBtn: document.getElementById('loadExcelBtn'),
   clearListsBtn: document.getElementById('clearListsBtn'),
@@ -28,15 +29,23 @@ const refs = {
   convertBtn: document.getElementById('convertBtn'),
   convertStatus: document.getElementById('convertStatus'),
   resultTableBody: document.querySelector('#resultTable tbody'),
+  addManualRowBtn: document.getElementById('addManualRowBtn'),
+  manualCode: document.getElementById('manualCode'),
+  manualDesc: document.getElementById('manualDesc'),
+  manualListType: document.getElementById('manualListType'),
+  manualQty: document.getElementById('manualQty'),
+  manualPrice: document.getElementById('manualPrice'),
   subtotal: document.getElementById('subtotal'),
   companyName: document.getElementById('companyName'),
   offerNo: document.getElementById('offerNo'),
   offerDate: document.getElementById('offerDate'),
   paymentType: document.getElementById('paymentType'),
+  maturityRate: document.getElementById('maturityRate'),
   discount: document.getElementById('discount'),
   vat: document.getElementById('vat'),
   note: document.getElementById('note'),
   discountAmount: document.getElementById('discountAmount'),
+  maturityAmount: document.getElementById('maturityAmount'),
   vatAmount: document.getElementById('vatAmount'),
   grandTotal: document.getElementById('grandTotal'),
   createOfferBtn: document.getElementById('createOfferBtn'),
@@ -45,7 +54,7 @@ const refs = {
 
 refs.offerDate.valueAsDate = new Date();
 bindEvents();
-renderListCounts();
+renderListsTable();
 
 function bindEvents() {
   refs.goOfferPage.addEventListener('click', () => switchPage('offer'));
@@ -54,27 +63,22 @@ function bindEvents() {
   refs.goPricePageInline.addEventListener('click', () => switchPage('price'));
 
   refs.loadExcelBtn.addEventListener('click', loadExcelList);
-  refs.clearListsBtn.addEventListener('click', () => {
-    priceLists.plastik = [];
-    priceLists.metal = [];
-    priceLists.diger = [];
-    refs.listStatus.textContent = 'Tüm fiyat listeleri temizlendi.';
-    renderListCounts();
-  });
+  refs.clearListsBtn.addEventListener('click', clearAllLists);
+  refs.listCountBody.addEventListener('click', onListDeleteClick);
 
-  refs.clearRequestBtn.addEventListener('click', () => {
-    refs.textRequest.value = '';
-    refs.pdfRequest.value = '';
-    refs.imageRequest.value = '';
-    refs.imageNotes.value = '';
-    refs.convertStatus.textContent = 'Talep alanları temizlendi.';
-  });
-
+  refs.clearRequestBtn.addEventListener('click', clearRequest);
   refs.convertBtn.addEventListener('click', convertRequests);
+  refs.addManualRowBtn.addEventListener('click', addManualRow);
+
+  refs.resultTableBody.addEventListener('click', onResultTableClick);
+  refs.resultTableBody.addEventListener('input', onResultTableInput);
+
   refs.createOfferBtn.addEventListener('click', createOffer);
   refs.downloadPdfBtn.addEventListener('click', downloadPdf);
   refs.discount.addEventListener('input', updateTotals);
   refs.vat.addEventListener('input', updateTotals);
+  refs.maturityRate.addEventListener('input', updateTotals);
+  refs.paymentType.addEventListener('change', onPaymentTypeChange);
 }
 
 function switchPage(target) {
@@ -102,23 +106,83 @@ async function loadExcelList() {
       blankrows: false,
     });
 
-    const normalized = mapExcelRows(rawRows, refs.listType.value);
-    priceLists[refs.listType.value] = normalized;
-    renderListCounts();
+    const listType = refs.listType.value;
+    const listName = refs.listName.value.trim() || `${capitalize(listType)} Liste ${priceLists[listType].length + 1}`;
+    const items = mapExcelRows(rawRows, listType, listName);
 
-    if (!normalized.length) {
-      refs.listStatus.textContent = 'Excel okundu ancak ürün satırı bulunamadı. Lütfen kolon adlarını kontrol edin.';
+    if (!items.length) {
+      refs.listStatus.textContent = 'Excel okundu ancak ürün satırı bulunamadı.';
       return;
     }
 
-    refs.listStatus.textContent = `${normalized.length} ürün "${refs.listType.value}" listesine yüklendi.`;
+    priceLists[listType].push({
+      id: createId(),
+      listName,
+      listType,
+      items,
+    });
+
+    renderListsTable();
+    refs.listStatus.textContent = `${listName} listesi eklendi (${items.length} ürün).`;
     refs.excelUpload.value = '';
+    refs.listName.value = '';
   } catch (error) {
     refs.listStatus.textContent = `Excel okunamadı: ${error.message}`;
   }
 }
 
-function mapExcelRows(rawRows, listType) {
+function clearAllLists() {
+  priceLists.plastik = [];
+  priceLists.metal = [];
+  priceLists.diger = [];
+  renderListsTable();
+  refs.listStatus.textContent = 'Tüm fiyat listeleri temizlendi.';
+}
+
+function onListDeleteClick(event) {
+  const button = event.target.closest('[data-delete-list-id]');
+  if (!button) return;
+
+  const listType = button.dataset.deleteListType;
+  const listId = button.dataset.deleteListId;
+  priceLists[listType] = priceLists[listType].filter((list) => list.id !== listId);
+  renderListsTable();
+  refs.listStatus.textContent = 'Liste silindi.';
+}
+
+function renderListsTable() {
+  refs.listCountBody.innerHTML = '';
+  const allLists = [...priceLists.plastik, ...priceLists.metal, ...priceLists.diger];
+
+  if (!allLists.length) {
+    refs.listCountBody.innerHTML = '<tr><td colspan="5">Henüz liste eklenmedi.</td></tr>';
+    return;
+  }
+
+  allLists.forEach((list) => {
+    const groups = summarizeGroups(list.items).join(', ');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${capitalize(list.listType)}</td>
+      <td>${escapeHtml(list.listName)}</td>
+      <td>${list.items.length}</td>
+      <td>${escapeHtml(groups || '-')}</td>
+      <td><button class="danger" data-delete-list-id="${list.id}" data-delete-list-type="${list.listType}">Sil</button></td>
+    `;
+    refs.listCountBody.appendChild(tr);
+  });
+}
+
+function summarizeGroups(items) {
+  const map = new Map();
+  items.forEach((item) => {
+    const group = String(item.description || 'Diğer').trim().split(/\s+/)[0] || 'Diğer';
+    map.set(group, (map.get(group) || 0) + 1);
+  });
+  return [...map.entries()].slice(0, 5).map(([group, count]) => `${group} (${count})`);
+}
+
+function mapExcelRows(rawRows, listType, listName) {
   if (!rawRows.length) return [];
 
   const headerCandidateLimit = Math.min(rawRows.length, 6);
@@ -128,11 +192,7 @@ function mapExcelRows(rawRows, listType) {
 
   for (let i = 0; i < headerCandidateLimit; i += 1) {
     const row = rawRows[i].map((cell) => normalizeText(cell));
-    const score = row.reduce((sum, cell) => {
-      if (isCodeHeader(cell) || isDescriptionHeader(cell) || isPriceHeader(cell)) return sum + 1;
-      return sum;
-    }, 0);
-
+    const score = row.reduce((sum, cell) => (isCodeHeader(cell) || isDescriptionHeader(cell) || isPriceHeader(cell) ? sum + 1 : sum), 0);
     if (score > bestScore) {
       bestScore = score;
       headerRowIndex = i;
@@ -148,18 +208,13 @@ function mapExcelRows(rawRows, listType) {
   const dataRows = rawRows.slice(headerRowIndex + 1);
   const inferredPriceIndex = detectedPriceIndex === -1 ? inferPriceColumnIndex(dataRows) : detectedPriceIndex;
   const priceIndex = inferredPriceIndex === -1 ? 2 : inferredPriceIndex;
+
   return dataRows
     .map((row) => {
       const code = String(row[codeIndex] ?? '').trim();
       const description = String(row[descriptionIndex] ?? '').trim();
       const unitPrice = parsePrice(row[priceIndex]);
-
-      return {
-        code,
-        description,
-        unitPrice,
-        listType,
-      };
+      return { code, description, unitPrice, listType, listName };
     })
     .filter((item) => item.code || item.description);
 }
@@ -172,26 +227,17 @@ function findColumnIndex(headerRow, matcher, fallback) {
 function inferPriceColumnIndex(dataRows) {
   const sampleRows = dataRows.slice(0, 30);
   const maxColumnCount = sampleRows.reduce((max, row) => Math.max(max, row.length), 0);
-
   let bestIndex = -1;
   let bestScore = -1;
 
   for (let col = 0; col < maxColumnCount; col += 1) {
-    let numericCount = 0;
-    let decimalLikeCount = 0;
-
+    let score = 0;
     sampleRows.forEach((row) => {
       const raw = row[col];
       const value = parsePrice(raw);
-      if (value > 0) {
-        numericCount += 1;
-        if (String(raw ?? '').includes(',') || String(raw ?? '').includes('.')) {
-          decimalLikeCount += 1;
-        }
-      }
+      if (value > 0) score += 1;
+      if (String(raw ?? '').includes(',') || String(raw ?? '').includes('.')) score += 0.5;
     });
-
-    const score = numericCount + decimalLikeCount * 0.5;
     if (score > bestScore) {
       bestScore = score;
       bestIndex = col;
@@ -223,22 +269,16 @@ function normalizeText(value) {
 }
 
 function parsePrice(rawValue) {
-  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
-    return rawValue;
-  }
-
+  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) return rawValue;
   const raw = String(rawValue ?? '').trim();
   if (!raw) return 0;
 
   const sanitized = raw.replace(/\s/g, '').replace(/[^0-9,.-]/g, '');
-  if (!sanitized) return 0;
-
   const lastComma = sanitized.lastIndexOf(',');
   const lastDot = sanitized.lastIndexOf('.');
-  const decimalSeparator = lastComma > lastDot ? ',' : '.';
-
   let normalized = sanitized;
-  if (decimalSeparator === ',') {
+
+  if (lastComma > lastDot) {
     normalized = normalized.replace(/\./g, '').replace(',', '.');
   } else {
     normalized = normalized.replace(/,/g, '');
@@ -248,37 +288,21 @@ function parsePrice(rawValue) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function renderListCounts() {
-  refs.listCountBody.innerHTML = '';
-  ['plastik', 'metal', 'diger'].forEach((listName) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${capitalize(listName)}</td><td>${priceLists[listName].length}</td>`;
-    refs.listCountBody.appendChild(tr);
-  });
-}
-
-function capitalize(text) {
-  return text.charAt(0).toUpperCase() + text.slice(1);
+function clearRequest() {
+  refs.textRequest.value = '';
+  refs.pdfRequest.value = '';
+  refs.imageRequest.value = '';
+  refs.imageNotes.value = '';
+  refs.convertStatus.textContent = 'Talep alanları temizlendi.';
 }
 
 async function convertRequests() {
   const allText = [];
-
-  if (refs.textRequest.value.trim()) {
-    allText.push(refs.textRequest.value.trim());
-  }
-
-  if (refs.pdfRequest.files[0]) {
-    const pdfText = await extractPdfText(refs.pdfRequest.files[0]);
-    allText.push(pdfText);
-  }
-
+  if (refs.textRequest.value.trim()) allText.push(refs.textRequest.value.trim());
+  if (refs.pdfRequest.files[0]) allText.push(await extractPdfText(refs.pdfRequest.files[0]));
   if (refs.imageRequest.files[0]) {
-    const imageName = refs.imageRequest.files[0].name;
-    allText.push(`Görsel dosyası: ${imageName}`);
-    if (refs.imageNotes.value.trim()) {
-      allText.push(refs.imageNotes.value.trim());
-    }
+    allText.push(`Görsel dosyası: ${refs.imageRequest.files[0].name}`);
+    if (refs.imageNotes.value.trim()) allText.push(refs.imageNotes.value.trim());
   }
 
   const merged = allText.join('\n').trim();
@@ -287,11 +311,10 @@ async function convertRequests() {
     return;
   }
 
-  const requestedItems = parseRequestText(merged);
-  convertedItems = smartMatch(requestedItems);
+  convertedItems = smartMatch(parseRequestText(merged));
   renderTable();
   updateTotals();
-  refs.convertStatus.textContent = `${convertedItems.length} satır dönüştürüldü ve fiyatlandırıldı.`;
+  refs.convertStatus.textContent = `${convertedItems.length} satır dönüştürüldü.`;
 }
 
 function parseRequestText(text) {
@@ -300,60 +323,36 @@ function parseRequestText(text) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const { quantity, cleanName } = extractQuantity(line);
-      return {
-        search: cleanName || line,
-        quantity,
-      };
+      const explicit = [...line.matchAll(/(\d+)\s*(adet|pcs|tane)\b/gi)].pop();
+      const quantity = explicit ? Number(explicit[1]) : Number(line.match(/(\d+)\s*$/)?.[1] || 1);
+      const cleanName = explicit ? line.replace(explicit[0], '').trim() : line.replace(/(\d+)\s*$/, '').trim();
+      return { search: cleanName || line, quantity: Number.isFinite(quantity) ? quantity : 1 };
     });
 }
 
-function extractQuantity(line) {
-  const explicitQuantityMatches = [...line.matchAll(/(\d+)\s*(adet|pcs|tane)\b/gi)];
-  if (explicitQuantityMatches.length) {
-    const selected = explicitQuantityMatches[explicitQuantityMatches.length - 1];
-    const quantity = Number(selected[1]);
-    const cleanName = line.replace(selected[0], '').trim();
-    return { quantity: Number.isFinite(quantity) ? quantity : 1, cleanName };
-  }
-
-  const trailingNumber = line.match(/(\d+)\s*$/);
-  if (trailingNumber) {
-    const quantity = Number(trailingNumber[1]);
-    const cleanName = line.replace(/(\d+)\s*$/, '').trim();
-    return { quantity: Number.isFinite(quantity) ? quantity : 1, cleanName };
-  }
-
-  return { quantity: 1, cleanName: line };
+function getAllItems() {
+  return [...priceLists.plastik, ...priceLists.metal, ...priceLists.diger].flatMap((list) => list.items);
 }
 
 function smartMatch(items) {
-  const flattened = [...priceLists.plastik, ...priceLists.metal, ...priceLists.diger];
-
+  const flattened = getAllItems();
   return items.map((item) => {
-    if (!flattened.length) {
-      return { code: '-', description: item.search, listType: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
-    }
+    if (!flattened.length) return { code: '-', description: item.search, listLabel: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
 
     const match = flattened
-      .map((candidate) => {
-        const score = similarity(item.search.toLowerCase(), `${candidate.code} ${candidate.description}`.toLowerCase());
-        return { candidate, score };
-      })
+      .map((candidate) => ({ candidate, score: similarity(item.search.toLowerCase(), `${candidate.code} ${candidate.description}`.toLowerCase()) }))
       .sort((a, b) => b.score - a.score)[0];
 
-    if (!match || match.score < 0.25) {
-      return { code: '-', description: item.search, listType: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
-    }
+    if (!match || match.score < 0.25) return { code: '-', description: item.search, listLabel: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
 
-    const total = item.quantity * match.candidate.unitPrice;
+    const unitPrice = Number(match.candidate.unitPrice) || 0;
     return {
       code: match.candidate.code || '-',
       description: match.candidate.description || item.search,
-      listType: match.candidate.listType,
+      listLabel: `${capitalize(match.candidate.listType)} / ${match.candidate.listName}`,
       quantity: item.quantity,
-      unitPrice: match.candidate.unitPrice,
-      total,
+      unitPrice,
+      total: unitPrice * item.quantity,
     };
   });
 }
@@ -363,46 +362,105 @@ function similarity(a, b) {
   const tokensB = b.split(/\s+/).filter(Boolean);
   if (!tokensA.length || !tokensB.length) return 0;
   const setB = new Set(tokensB);
-  let common = 0;
-  for (const token of tokensA) if (setB.has(token)) common += 1;
+  const common = tokensA.filter((token) => setB.has(token)).length;
   return common / Math.max(tokensA.length, tokensB.length);
 }
 
 function renderTable() {
   refs.resultTableBody.innerHTML = '';
-  convertedItems.forEach((item) => {
+  convertedItems.forEach((item, index) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${escapeHtml(item.code)}</td>
       <td>${escapeHtml(item.description)}</td>
-      <td>${escapeHtml(item.listType)}</td>
-      <td>${item.quantity}</td>
+      <td>${escapeHtml(item.listLabel)}</td>
+      <td><input class="qty-input" data-qty-index="${index}" type="number" min="1" value="${item.quantity}" /></td>
       <td>${formatMoney(item.unitPrice)}</td>
       <td>${formatMoney(item.total)}</td>
+      <td><button class="danger" data-remove-index="${index}">Sil</button></td>
     `;
     refs.resultTableBody.appendChild(tr);
   });
 }
 
+function onResultTableClick(event) {
+  const button = event.target.closest('[data-remove-index]');
+  if (!button) return;
+  const index = Number(button.dataset.removeIndex);
+  convertedItems.splice(index, 1);
+  renderTable();
+  updateTotals();
+}
+
+function onResultTableInput(event) {
+  const input = event.target.closest('[data-qty-index]');
+  if (!input) return;
+  const index = Number(input.dataset.qtyIndex);
+  const qty = Math.max(1, Number(input.value || 1));
+  convertedItems[index].quantity = qty;
+  convertedItems[index].total = qty * convertedItems[index].unitPrice;
+  renderTable();
+  updateTotals();
+}
+
+function addManualRow() {
+  const code = refs.manualCode.value.trim() || '-';
+  const description = refs.manualDesc.value.trim();
+  const quantity = Math.max(1, Number(refs.manualQty.value || 1));
+  const unitPrice = parsePrice(refs.manualPrice.value);
+
+  if (!description) {
+    refs.convertStatus.textContent = 'Manuel ekleme için ürün açıklaması zorunlu.';
+    return;
+  }
+
+  convertedItems.push({
+    code,
+    description,
+    listLabel: `Manuel / ${capitalize(refs.manualListType.value)}`,
+    quantity,
+    unitPrice,
+    total: quantity * unitPrice,
+  });
+
+  refs.manualCode.value = '';
+  refs.manualDesc.value = '';
+  refs.manualQty.value = '1';
+  refs.manualPrice.value = '';
+  renderTable();
+  updateTotals();
+}
+
+function onPaymentTypeChange() {
+  const needsMaturity = refs.paymentType.value === 'cek' || refs.paymentType.value === 'kredi_karti';
+  refs.maturityRate.disabled = !needsMaturity;
+  if (!needsMaturity) refs.maturityRate.value = '0';
+  updateTotals();
+}
+
 function updateTotals() {
   const subtotal = convertedItems.reduce((sum, row) => sum + row.total, 0);
   const discountRate = Number(refs.discount.value || 0) / 100;
+  const maturityRate = Number(refs.maturityRate.value || 0) / 100;
   const vatRate = Number(refs.vat.value || 0) / 100;
 
   const discountAmount = subtotal * discountRate;
-  const net = subtotal - discountAmount;
-  const vatAmount = net * vatRate;
-  const grandTotal = net + vatAmount;
+  const afterDiscount = subtotal - discountAmount;
+  const maturityAmount = afterDiscount * maturityRate;
+  const afterMaturity = afterDiscount + maturityAmount;
+  const vatAmount = afterMaturity * vatRate;
+  const grandTotal = afterMaturity + vatAmount;
 
   refs.subtotal.textContent = formatMoney(subtotal);
   refs.discountAmount.textContent = formatMoney(discountAmount);
+  refs.maturityAmount.textContent = formatMoney(maturityAmount);
   refs.vatAmount.textContent = formatMoney(vatAmount);
   refs.grandTotal.textContent = formatMoney(grandTotal);
 }
 
 function createOffer() {
   if (!convertedItems.length) {
-    refs.convertStatus.textContent = 'Önce ürünleri dönüştürün.';
+    refs.convertStatus.textContent = 'Önce ürün ekleyin veya dönüştürün.';
     return;
   }
 
@@ -410,15 +468,16 @@ function createOffer() {
     companyName: refs.companyName.value.trim() || 'Belirtilmedi',
     offerNo: refs.offerNo.value.trim() || `TKL-${Date.now()}`,
     offerDate: refs.offerDate.value || new Date().toISOString().slice(0, 10),
-    paymentType: refs.paymentType.value.trim() || 'Belirtilmedi',
+    paymentType: refs.paymentType.options[refs.paymentType.selectedIndex].text,
+    maturityRate: Number(refs.maturityRate.value || 0),
     discountRate: Number(refs.discount.value || 0),
     vatRate: Number(refs.vat.value || 0),
     note: refs.note.value.trim(),
     items: [...convertedItems],
   };
 
-  refs.convertStatus.textContent = `Teklif hazırlandı: ${latestOffer.offerNo}`;
   refs.downloadPdfBtn.disabled = false;
+  refs.convertStatus.textContent = `Teklif hazırlandı: ${latestOffer.offerNo}`;
 }
 
 function downloadPdf() {
@@ -426,8 +485,8 @@ function downloadPdf() {
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
-
   let y = 15;
+
   doc.setFontSize(16);
   doc.text('TEKLIF', 14, y);
   y += 10;
@@ -439,10 +498,9 @@ function downloadPdf() {
   doc.text(`Tarih: ${latestOffer.offerDate}`, 14, y);
   y += 7;
   doc.text(`Odeme Sekli: ${latestOffer.paymentType}`, 14, y);
+  y += 7;
+  doc.text(`Vade Farki: %${latestOffer.maturityRate}`, 14, y);
   y += 10;
-
-  doc.text('Urunler:', 14, y);
-  y += 6;
 
   latestOffer.items.forEach((item, index) => {
     const line = `${index + 1}) ${item.code} - ${item.description} | ${item.quantity} adet x ${formatMoney(item.unitPrice)} = ${formatMoney(item.total)} TL`;
@@ -458,9 +516,11 @@ function downloadPdf() {
   y += 4;
   doc.text(`Ara Toplam: ${refs.subtotal.textContent} TL`, 14, y);
   y += 7;
-  doc.text(`Iskonto (%${latestOffer.discountRate}): ${refs.discountAmount.textContent} TL`, 14, y);
+  doc.text(`Iskonto: ${refs.discountAmount.textContent} TL`, 14, y);
   y += 7;
-  doc.text(`KDV (%${latestOffer.vatRate}): ${refs.vatAmount.textContent} TL`, 14, y);
+  doc.text(`Vade Farki: ${refs.maturityAmount.textContent} TL`, 14, y);
+  y += 7;
+  doc.text(`KDV: ${refs.vatAmount.textContent} TL`, 14, y);
   y += 7;
   doc.text(`Genel Toplam: ${refs.grandTotal.textContent} TL`, 14, y);
 
@@ -472,13 +532,11 @@ async function extractPdfText(file) {
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let text = '';
-
     for (let i = 1; i <= pdf.numPages; i += 1) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       text += `\n${content.items.map((it) => it.str).join(' ')}`;
     }
-
     return text;
   } catch {
     return '';
@@ -486,11 +544,15 @@ async function extractPdfText(file) {
 }
 
 function formatMoney(value) {
-  const number = Number(value) || 0;
-  return new Intl.NumberFormat('tr-TR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(number);
+  return new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value) || 0);
+}
+
+function createId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function capitalize(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function escapeHtml(str) {
