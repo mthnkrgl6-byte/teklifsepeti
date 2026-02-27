@@ -367,7 +367,8 @@ async function convertRequests() {
   convertedItems = smartMatch(parseRequestText(merged));
   renderTable();
   updateTotals();
-  refs.convertStatus.textContent = `${convertedItems.length} satır dönüştürüldü.`;
+  const unmatchedCount = convertedItems.filter((row) => row.unitPrice === 0).length;
+  refs.convertStatus.textContent = `${convertedItems.length} satır dönüştürüldü. ${unmatchedCount ? `${unmatchedCount} satırda eşleşme zayıf.` : ''}`.trim();
 }
 
 function parseRequestText(text) {
@@ -432,24 +433,32 @@ function getAllItems() {
 function smartMatch(items) {
   const flattened = getAllItems();
   return items.map((item) => {
-    if (!flattened.length) return createUnmatchedRow(item);
+    if (!flattened.length) return createUnmatchedRow(item, []);
 
     const searchText = normalizeForMatch(item.search);
-    const match = flattened
+    const scored = flattened
       .map((candidate) => {
         const candidateText = normalizeForMatch(`${candidate.code} ${candidate.description}`);
         const score = similarity(searchText, candidateText);
         return { candidate, score };
       })
-      .sort((a, b) => b.score - a.score)[0];
+      .sort((a, b) => b.score - a.score);
 
-    if (!match || match.score < 0.08) return createUnmatchedRow(item);
+    const topMatch = scored[0];
+    const suggestions = scored.slice(0, 3).map((row) => row.candidate.description || row.candidate.code || '-');
 
-    const unitPrice = Number(match.candidate.unitPrice) || 0;
+    if (!topMatch) return createUnmatchedRow(item, suggestions);
+
+    // Çok düşük skorlarda eşleşme yok, orta skorlarda düşük güvenli eşleştirme yap.
+    if (topMatch.score < 0.04) return createUnmatchedRow(item, suggestions);
+
+    const unitPrice = Number(topMatch.candidate.unitPrice) || 0;
+    const weakMatch = topMatch.score < 0.08;
+
     return {
-      code: match.candidate.code || '-',
-      description: match.candidate.description || item.search,
-      listLabel: `${capitalize(match.candidate.listType)} / ${match.candidate.listName}`,
+      code: topMatch.candidate.code || '-',
+      description: topMatch.candidate.description || item.search,
+      listLabel: `${capitalize(topMatch.candidate.listType)} / ${topMatch.candidate.listName}${weakMatch ? ' (düşük güven)' : ''}`,
       quantity: item.quantity,
       unitPrice,
       total: unitPrice * item.quantity,
@@ -457,8 +466,9 @@ function smartMatch(items) {
   });
 }
 
-function createUnmatchedRow(item) {
-  return { code: '-', description: item.search, listLabel: 'eşleşme yok', quantity: item.quantity, unitPrice: 0, total: 0 };
+function createUnmatchedRow(item, suggestions = []) {
+  const hint = suggestions.length ? `eşleşme yok | öneri: ${suggestions.join(' / ')}` : 'eşleşme yok';
+  return { code: '-', description: item.search, listLabel: hint, quantity: item.quantity, unitPrice: 0, total: 0 };
 }
 
 function normalizeForMatch(text) {
