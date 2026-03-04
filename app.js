@@ -193,28 +193,100 @@ function summarizeGroups(items) {
 function mapPdfRows(pdfText, listType, listName) {
   if (!pdfText || !pdfText.trim()) return [];
 
-  return pdfText
+  const rawLines = pdfText
     .split(/\n+/)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .map((line) => {
-      const priceMatch = line.match(/(\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?|\d+(?:\.\d+)?)(?:\s*(?:tl|try|₺))?\s*$/i);
-      const unitPrice = priceMatch ? parsePrice(priceMatch[1]) : 0;
-      const textWithoutPrice = priceMatch ? line.slice(0, priceMatch.index).trim() : line;
+    .map((line) => line.replace(/[  -​  　]/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
 
-      const codeMatch = textWithoutPrice.match(/^([A-Za-z0-9\-_.\/]+)\s+/);
-      const code = codeMatch ? codeMatch[1] : '-';
-      const description = codeMatch ? textWithoutPrice.slice(codeMatch[0].length).trim() : textWithoutPrice;
+  const mergedLines = mergeWrappedPdfLines(rawLines);
 
-      return {
-        code: code || '-',
-        description: description || textWithoutPrice,
-        unitPrice,
-        listType,
-        listName,
-      };
-    })
-    .filter((item) => item.description && item.unitPrice > 0);
+  return mergedLines
+    .map((line) => parsePdfProductLine(line, listType, listName))
+    .filter(Boolean);
+}
+
+function mergeWrappedPdfLines(lines) {
+  const merged = [];
+  let buffer = '';
+
+  const priceOnlyRegex = /^(?:tl|try|₺)?\s*\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?\s*(?:tl|try|₺)?$/i;
+
+  for (const line of lines) {
+    const hasPrice = extractLinePrice(line) !== null;
+    const isPriceOnly = priceOnlyRegex.test(line);
+
+    if (!buffer) {
+      buffer = line;
+      if (hasPrice && !isPriceOnly) {
+        merged.push(buffer);
+        buffer = '';
+      }
+      continue;
+    }
+
+    if (isPriceOnly) {
+      merged.push(`${buffer} ${line}`.replace(/\s+/g, ' ').trim());
+      buffer = '';
+      continue;
+    }
+
+    if (hasPrice) {
+      merged.push(`${buffer} ${line}`.replace(/\s+/g, ' ').trim());
+      buffer = '';
+      continue;
+    }
+
+    if (buffer.length > 0) {
+      buffer = `${buffer} ${line}`.replace(/\s+/g, ' ').trim();
+      if (buffer.length > 180) {
+        merged.push(buffer);
+        buffer = '';
+      }
+    }
+  }
+
+  if (buffer) merged.push(buffer);
+  return merged;
+}
+
+function extractLinePrice(line) {
+  const allPriceLike = [...line.matchAll(/\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?|\d+(?:\.\d+)?/g)].map((m) => m[0]);
+  if (!allPriceLike.length) return null;
+
+  const candidates = allPriceLike
+    .map((raw) => ({ raw, value: parsePrice(raw) }))
+    .filter((x) => x.value > 0);
+
+  if (!candidates.length) return null;
+
+  // Genelde satırdaki en son fiyat benzeri değer birim fiyattır.
+  return candidates[candidates.length - 1];
+}
+
+function parsePdfProductLine(line, listType, listName) {
+  const priceData = extractLinePrice(line);
+  if (!priceData) return null;
+
+  const pricePos = line.lastIndexOf(priceData.raw);
+  const left = pricePos >= 0 ? line.slice(0, pricePos).trim() : line;
+  const right = pricePos >= 0 ? line.slice(pricePos + priceData.raw.length).trim() : '';
+
+  const textWithoutPrice = `${left} ${right}`.replace(/\\b(tl|try|₺)\\b/gi, '').replace(/\s+/g, ' ').trim();
+  if (!textWithoutPrice) return null;
+
+  const codeMatch = textWithoutPrice.match(/^([A-Za-z0-9\-_.\/]{2,})\s+/);
+  const code = codeMatch ? codeMatch[1] : '-';
+  const description = codeMatch ? textWithoutPrice.slice(codeMatch[0].length).trim() : textWithoutPrice;
+
+  if (!description) return null;
+
+  return {
+    code,
+    description,
+    unitPrice: priceData.value,
+    listType,
+    listName,
+  };
 }
 
 function mapExcelRows(rawRows, listType, listName) {
