@@ -92,26 +92,34 @@ function switchPage(target) {
 async function loadExcelList() {
   const file = refs.excelUpload.files[0];
   if (!file) {
-    refs.listStatus.textContent = 'Lütfen bir Excel dosyası seçin.';
+    refs.listStatus.textContent = 'Lütfen bir Excel veya PDF dosyası seçin.';
     return;
   }
 
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    const sheetName = workbook.SheetNames[0];
-    const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-      header: 1,
-      defval: '',
-      blankrows: false,
-    });
-
     const listType = refs.listType.value;
     const listName = refs.listName.value.trim() || `${capitalize(listType)} Liste ${priceLists[listType].length + 1}`;
-    const items = mapExcelRows(rawRows, listType, listName);
+
+    let items = [];
+    const lowerName = file.name.toLowerCase();
+
+    if (lowerName.endsWith('.pdf') || file.type === 'application/pdf') {
+      const pdfText = await extractPdfText(file);
+      items = mapPdfRows(pdfText, listType, listName);
+    } else {
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+        header: 1,
+        defval: '',
+        blankrows: false,
+      });
+      items = mapExcelRows(rawRows, listType, listName);
+    }
 
     if (!items.length) {
-      refs.listStatus.textContent = 'Excel okundu ancak ürün satırı bulunamadı.';
+      refs.listStatus.textContent = 'Dosya okundu ancak ürün satırı bulunamadı.';
       return;
     }
 
@@ -127,7 +135,7 @@ async function loadExcelList() {
     refs.excelUpload.value = '';
     refs.listName.value = '';
   } catch (error) {
-    refs.listStatus.textContent = `Excel okunamadı: ${error.message}`;
+    refs.listStatus.textContent = `Liste dosyası okunamadı: ${error.message}`;
   }
 }
 
@@ -180,6 +188,33 @@ function summarizeGroups(items) {
     map.set(group, (map.get(group) || 0) + 1);
   });
   return [...map.entries()].slice(0, 5).map(([group, count]) => `${group} (${count})`);
+}
+
+function mapPdfRows(pdfText, listType, listName) {
+  if (!pdfText || !pdfText.trim()) return [];
+
+  return pdfText
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .map((line) => {
+      const priceMatch = line.match(/(\d{1,3}(?:[.\s]\d{3})*(?:,\d+)?|\d+(?:\.\d+)?)(?:\s*(?:tl|try|₺))?\s*$/i);
+      const unitPrice = priceMatch ? parsePrice(priceMatch[1]) : 0;
+      const textWithoutPrice = priceMatch ? line.slice(0, priceMatch.index).trim() : line;
+
+      const codeMatch = textWithoutPrice.match(/^([A-Za-z0-9\-_.\/]+)\s+/);
+      const code = codeMatch ? codeMatch[1] : '-';
+      const description = codeMatch ? textWithoutPrice.slice(codeMatch[0].length).trim() : textWithoutPrice;
+
+      return {
+        code: code || '-',
+        description: description || textWithoutPrice,
+        unitPrice,
+        listType,
+        listName,
+      };
+    })
+    .filter((item) => item.description && item.unitPrice > 0);
 }
 
 function mapExcelRows(rawRows, listType, listName) {
